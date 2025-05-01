@@ -609,6 +609,7 @@ screen_write_box_border_set(enum box_lines lines, int cell_type,
                 utf8_copy(&gc->data, tty_acs_heavy_borders(cell_type));
 		break;
         case BOX_LINES_ROUNDED:
+	case BOX_LINES_DEFAULT:
                 gc->attr &= ~GRID_ATTR_CHARSET;
                 utf8_copy(&gc->data, tty_acs_rounded_borders(cell_type));
 		break;
@@ -621,7 +622,6 @@ screen_write_box_border_set(enum box_lines lines, int cell_type,
                 utf8_set(&gc->data, PADDED_BORDERS[cell_type]);
                 break;
 	case BOX_LINES_SINGLE:
-	case BOX_LINES_DEFAULT:
 		gc->attr |= GRID_ATTR_CHARSET;
 		utf8_set(&gc->data, CELL_BORDERS[cell_type]);
 		break;
