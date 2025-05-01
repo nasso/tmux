@@ -1030,7 +1030,8 @@ enum pane_lines {
 	PANE_LINES_HEAVY,
 	PANE_LINES_SIMPLE,
 	PANE_LINES_NUMBER,
-	PANE_LINES_SPACES
+ 	PANE_LINES_SPACES,
+	PANE_LINES_ROUNDED
 };
 
 /* Pane border indicator option. */
