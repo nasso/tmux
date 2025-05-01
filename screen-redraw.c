@@ -78,6 +78,10 @@ screen_redraw_border_set(struct window *w, struct window_pane *wp,
 		gc->attr &= ~GRID_ATTR_CHARSET;
 		utf8_copy(&gc->data, tty_acs_heavy_borders(cell_type));
 		break;
+	case PANE_LINES_ROUNDED:
+		gc->attr &= ~GRID_ATTR_CHARSET;
+		utf8_copy(&gc->data, tty_acs_rounded_borders(cell_type));
+		break;
 	case PANE_LINES_SIMPLE:
 		gc->attr &= ~GRID_ATTR_CHARSET;
 		utf8_set(&gc->data, SIMPLE_BORDERS[cell_type]);
@@ -221,9 +225,43 @@ screen_redraw_cell_border(struct screen_redraw_ctx *ctx, u_int px, u_int py)
 	return (0);
 }
 
-/* Work out type of border cell from surrounding cells. */
+/* Check if a cell is on the border of a pane. */
 static int
-screen_redraw_type_of_cell(struct screen_redraw_ctx *ctx, u_int px, u_int py)
+screen_redraw_cell_pane_border(struct screen_redraw_ctx *ctx, u_int px,
+    u_int py, void *wp)
+{
+	struct client	*c = ctx->c;
+	struct window	*w = c->session->curw->window;
+
+	if (wp == NULL)
+		return (screen_redraw_cell_border(ctx, px, py));
+	/* Outside the window? */
+	if (px > w->sx || py > w->sy)
+		return (0);
+
+	/* On the window border? */
+	if (px == w->sx || py == w->sy)
+		return (1);
+
+	if (!window_pane_visible(wp))
+		return (0);
+	switch (screen_redraw_pane_border(ctx, wp, px, py)) {
+	case SCREEN_REDRAW_INSIDE:
+	case SCREEN_REDRAW_OUTSIDE:
+		return (0);
+	default:
+		return (1);
+	}
+}
+
+/*
+ * Construct a bitmask of whether the cells to the left (bit 4), right, top, and
+ * bottom (bit 1) of this cell are borders.
+ */
+static int
+screen_redraw_borders_mask(struct screen_redraw_ctx *ctx, u_int px, u_int py,
+    int (*check_border)(struct screen_redraw_ctx*, u_int, u_int, void*),
+    void *cb_data)
 {
 	struct client	*c = ctx->c;
 	int		 pane_status = ctx->pane_status;
@@ -231,38 +269,52 @@ screen_redraw_type_of_cell(struct screen_redraw_ctx *ctx, u_int px, u_int py)
 	u_int		 sx = w->sx, sy = w->sy;
 	int		 borders = 0;
 
+	if (px == 0 || check_border(ctx, px - 1, py, cb_data))
+		borders |= 8;
+	if (px <= sx && check_border(ctx, px + 1, py, cb_data))
+		borders |= 4;
+	if (pane_status == PANE_STATUS_TOP) {
+		if (py != 0 && check_border(ctx, px, py - 1, cb_data))
+			borders |= 2;
+		if (check_border(ctx, px, py + 1, cb_data))
+			borders |= 1;
+	} else if (pane_status == PANE_STATUS_BOTTOM) {
+		if (py == 0 || check_border(ctx, px, py - 1, cb_data))
+			borders |= 2;
+		if (py != sy - 1 && check_border(ctx, px, py + 1, cb_data))
+			borders |= 1;
+	} else {
+		if (py == 0 || check_border(ctx, px, py - 1, cb_data))
+			borders |= 2;
+		if (check_border(ctx, px, py + 1, cb_data))
+			borders |= 1;
+	}
+	return (borders);
+}
+
+/* Work out type of border cell from surrounding cells. */
+static int
+screen_redraw_type_of_cell(struct screen_redraw_ctx *ctx, u_int px, u_int py)
+{
+	struct client	*c = ctx->c;
+	int		 pane_status = ctx->pane_status;
+	struct window	*w = c->session->curw->window;
+	struct window_pane	*active = server_client_get_pane(c);
+	u_int		 sx = w->sx, sy = w->sy;
+	int		 borders = 0;
+
 	/* Is this outside the window? */
 	if (px > sx || py > sy)
 		return (CELL_OUTSIDE);
 
-	/*
-	 * Construct a bitmask of whether the cells to the left (bit 4), right,
-	 * top, and bottom (bit 1) of this cell are borders.
-	 */
-	if (px == 0 || screen_redraw_cell_border(ctx, px - 1, py))
-		borders |= 8;
-	if (px <= sx && screen_redraw_cell_border(ctx, px + 1, py))
-		borders |= 4;
-	if (pane_status == PANE_STATUS_TOP) {
-		if (py != 0 &&
-		    screen_redraw_cell_border(ctx, px, py - 1))
-			borders |= 2;
-		if (screen_redraw_cell_border(ctx, px, py + 1))
-			borders |= 1;
-	} else if (pane_status == PANE_STATUS_BOTTOM) {
-		if (py == 0 ||
-		    screen_redraw_cell_border(ctx, px, py - 1))
-			borders |= 2;
-		if (py != sy - 1 &&
-		    screen_redraw_cell_border(ctx, px, py + 1))
-			borders |= 1;
-	} else {
-		if (py == 0 ||
-		    screen_redraw_cell_border(ctx, px, py - 1))
-			borders |= 2;
-		if (screen_redraw_cell_border(ctx, px, py + 1))
-			borders |= 1;
+	/* Is this a border of the active pane? */
+	if (!screen_redraw_cell_pane_border(ctx, px, py, active)) {
+		active = NULL;
 	}
+
+	/* Connect borders of the active and inactive panes separately. */
+	borders = screen_redraw_borders_mask(ctx, px, py,
+	    screen_redraw_cell_pane_border, active);
 
 	/*
 	 * Figure out what kind of border this cell is. Only one bit set
